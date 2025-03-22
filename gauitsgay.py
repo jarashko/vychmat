@@ -1,7 +1,8 @@
 import random
 from decimal import Decimal, getcontext
 
-max_iter = 100000  # Увеличиваем максимальное количество итераций
+max_iter = 100000
+
 
 def dot_product(a, b):
     result = Decimal(0)
@@ -9,40 +10,87 @@ def dot_product(a, b):
         result += Decimal(a[i]) * Decimal(b[i])
     return result
 
+
 def norm(vector):
     result = Decimal(0)
     for val in vector:
         result += Decimal(val) ** Decimal(2)
     return result ** Decimal(0.5)
 
-getcontext().prec = 100  # Увеличиваем точность вычислений
+
+getcontext().prec = 100
+
+
+def matrix_vector_mult(A, x):
+    return [dot_product(row, x) for row in A]
+
+
+def transpose(A):
+    return list(map(list, zip(*A)))
+
+
+def operator_norm(A, max_iterations=1000, tolerance=Decimal('1e-10')):
+    n = len(A)
+    if n == 0:
+        return Decimal(0)
+
+    x = [Decimal(str(random.random())) for _ in range(n)]
+    x_norm = norm(x)
+    if x_norm == Decimal(0):
+        return Decimal(0)
+    x = [xi / x_norm for xi in x]
+
+    A_t = transpose(A)
+
+    for _ in range(max_iterations):
+        Ax = matrix_vector_mult(A, x)
+        AtAx = matrix_vector_mult(A_t, Ax)
+
+        new_norm = norm(AtAx)
+        if new_norm == Decimal(0):
+            return Decimal(0)
+        x_new = [xi / new_norm for xi in AtAx]
+
+        delta = norm([x_new[i] - x[i] for i in range(n)])
+        x = x_new
+        if delta < tolerance:
+            break
+
+    Ax = matrix_vector_mult(A, x)
+    AtAx = matrix_vector_mult(A_t, Ax)
+    lambda_max = dot_product(AtAx, x)
+
+    return lambda_max.sqrt()
+
+getcontext().prec = 100
 
 def gauss_seidel(A, b, x0, tol, max_iter):
     n = len(b)
     x = [Decimal(val) for val in x0]
     iterations = 0
-    residual = Decimal('Infinity')
-    prev_residual = Decimal('Infinity')
+    residual_norm = Decimal('Infinity')
 
-    while residual > tol and iterations < max_iter:
+    while residual_norm > tol and iterations < max_iter:
         x_new = x.copy()
         for i in range(n):
-            x_new[i] = (b[i] - dot_product(A[i][:i], x_new[:i]) - dot_product(A[i][i + 1:], x[i + 1:])) / A[i][i]
+            sigma = dot_product(A[i][:i], x_new[:i]) + dot_product(A[i][i + 1:], x[i + 1:])
+            x_new[i] = (b[i] - sigma) / A[i][i]
 
-        residual = norm([x_new[i] - x[i] for i in range(n)])
-        x = x_new.copy()
+        residual = [dot_product(A[i], x_new) - b[i] for i in range(n)]
+        residual_norm = norm(residual)
+
+        delta_norm = norm([x_new[i] - x[i] for i in range(n)])
+        x = x_new
+
         iterations += 1
+        print(f"Итерация {iterations}: Норма невязки = {residual_norm}, Изменение решения = {delta_norm}")
 
-        # Вывод промежуточной невязки
-        print(f"Итерация {iterations}: Норма невязки = {residual}")
-
-        # Проверка на застревание
-        if abs(residual - prev_residual) < Decimal('1E-50'):
-            print("Норма невязки перестала изменяться. Завершение итераций.")
+        if delta_norm < Decimal('1E-' + str(getcontext().prec // 2)):
+            print("Изменение решения стало слишком малым. Завершение итераций.")
             break
-        prev_residual = residual
 
     return x, iterations
+
 
 def check_diagonal_dominance(A):
     n = len(A)
@@ -240,8 +288,8 @@ def main():
             print("Ошибка: Невозможно достичь диагонального преобладания.")
             return
 
-    matrix_norm = norm([norm(row) for row in A])
-    print(f"Норма матрицы: {matrix_norm}")
+    matrix_norm =operator_norm(A)
+    print(f"Операторная Норма матрицы: {matrix_norm}")
 
     x0 = [Decimal(1)] * n
 
