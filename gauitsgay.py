@@ -1,8 +1,10 @@
 import random
 from decimal import Decimal, getcontext
+import numpy as np
+from scipy.linalg import lu, solve as scipy_solve
+from numpy.linalg import qr as numpy_qr, norm as numpy_norm
 
 max_iter = 100000
-
 
 def dot_product(a, b):
     result = Decimal(0)
@@ -10,24 +12,19 @@ def dot_product(a, b):
         result += Decimal(a[i]) * Decimal(b[i])
     return result
 
-
 def norm(vector):
     result = Decimal(0)
     for val in vector:
         result += Decimal(val) ** Decimal(2)
     return result ** Decimal(0.5)
 
-
 getcontext().prec = 100
-
 
 def matrix_vector_mult(A, x):
     return [dot_product(row, x) for row in A]
 
-
 def transpose(A):
     return list(map(list, zip(*A)))
-
 
 def operator_norm(A, max_iterations=1000, tolerance=Decimal('1e-10')):
     n = len(A)
@@ -62,8 +59,6 @@ def operator_norm(A, max_iterations=1000, tolerance=Decimal('1e-10')):
 
     return lambda_max.sqrt()
 
-getcontext().prec = 100
-
 def gauss_seidel(A, b, x0, tol, max_iter):
     n = len(b)
     x = [Decimal(val) for val in x0]
@@ -90,7 +85,6 @@ def gauss_seidel(A, b, x0, tol, max_iter):
             break
 
     return x, iterations
-
 
 def check_diagonal_dominance(A):
     n = len(A)
@@ -145,6 +139,22 @@ def load_matrix_from_file(filename):
     except ValueError as e:
         print(f"Ошибка при чтении файла: {e}")
         return None, None, None
+
+def solve_with_lu(A, b):
+    A_np = np.array(A, dtype=float)
+    b_np = np.array(b, dtype=float)
+    P, L, U = lu(A_np)
+    y = scipy_solve(L, b_np)
+    x = scipy_solve(U, y)
+    return x
+
+def solve_with_qr(A, b):
+    A_np = np.array(A, dtype=float)
+    b_np = np.array(b, dtype=float)
+    Q, R = numpy_qr(A_np)
+    y = Q.T @ b_np
+    x = scipy_solve(R, y)
+    return x
 
 def main():
     getcontext().prec = 100
@@ -288,14 +298,14 @@ def main():
             print("Ошибка: Невозможно достичь диагонального преобладания.")
             return
 
-    matrix_norm =operator_norm(A)
+    matrix_norm = operator_norm(A)
     print(f"Операторная Норма матрицы: {matrix_norm}")
 
     x0 = [Decimal(1)] * n
 
     x, iterations = gauss_seidel(A, b, x0, tol, max_iter)
 
-    print("Решение:")
+    print("Решение методом Гаусса-Зейделя:")
     for i, sol in enumerate(x, start=1):
         print(f"x{i} = {sol}")
 
@@ -313,6 +323,18 @@ def main():
         print("Требуемая точность достигнута.")
     else:
         print("Требуемая точность не достигнута.")
+
+    # Решение с использованием LU-разложения
+    x_lu = solve_with_lu(A, b)
+    print("Решение методом LU-разложения:")
+    for i, sol in enumerate(x_lu, start=1):
+        print(f"x{i} = {sol}")
+
+    # Решение с использованием QR-разложения
+    x_qr = solve_with_qr(A, b)
+    print("Решение методом QR-разложения:")
+    for i, sol in enumerate(x_qr, start=1):
+        print(f"x{i} = {sol}")
 
 def generate_random_matrix(n):
     A = [[Decimal(0)] * n for _ in range(n)]
