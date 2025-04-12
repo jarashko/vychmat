@@ -1,8 +1,9 @@
 import random
 from decimal import Decimal, getcontext
 import numpy as np
-from scipy.linalg import lu, solve as scipy_solve
-from numpy.linalg import qr as numpy_qr, norm as numpy_norm
+from scipy.linalg import solve as scipy_solve
+import warnings
+warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 max_iter = 100000
 
@@ -20,17 +21,82 @@ def norm(vector):
 
 getcontext().prec = 100
 
+def lu_decomposition(A):
+    n = len(A)
+    L = np.eye(n, dtype=float)
+    U = np.zeros((n, n), dtype=float)
+
+    for i in range(n):
+        for j in range(i, n):
+            U[i, j] = A[i, j] - sum(L[i, k] * U[k, j] for k in range(i))
+        for j in range(i + 1, n):
+            L[j, i] = (A[j, i] - sum(L[j, k] * U[k, i] for k in range(i))) / U[i, i]
+
+    return L, U
+
+
+def forward_substitution(L, b):
+    n = len(b)
+    y = np.zeros(n, dtype=float)
+    for i in range(n):
+        y[i] = (b[i] - sum(L[i, j] * y[j] for j in range(i))) / L[i, i]
+    return y
+
+
+def backward_substitution(U, y):
+    n = len(y)
+    x = np.zeros(n, dtype=float)
+    for i in range(n - 1, -1, -1):
+        if np.isclose(U[i, i], 0, atol=1e-10):
+            x[i] = 0.0
+        else:
+            x[i] = (y[i] - np.dot(U[i, i+1:], x[i+1:])) / U[i, i]
+    return x
+
+def solve_with_lu(A, b):
+    A_np = np.array(A, dtype=float)
+    b_np = np.array(b, dtype=float)
+    L, U = lu_decomposition(A_np)
+    y = forward_substitution(L, b_np)
+    x = backward_substitution(U, y)
+    return x
+
+
+def gram_schmidt_qr(A):
+    m, n = A.shape
+    Q = np.zeros((m, n))
+    R = np.zeros((n, n))
+
+    for i in range(n):
+        v = A[:, i].astype(float)
+        for j in range(i):
+            R[j, i] = np.dot(Q[:, j], A[:, i])
+            v = v - R[j, i] * Q[:, j]
+        R[i, i] = np.linalg.norm(v)
+        Q[:, i] = v / R[i, i]
+    return Q, R
+
+
+def solve_with_qr(A, b):
+    A_np = np.array(A, dtype=float)
+    b_np = np.array(b, dtype=float)
+    Q, R = gram_schmidt_qr(A_np)
+    y = Q.T @ b_np
+    x = scipy_solve(R, y)
+    return x
+
+
 def matrix_vector_mult(A, x):
     return [dot_product(row, x) for row in A]
 
 def transpose(A):
     return list(map(list, zip(*A)))
 
+
 def operator_norm(A, max_iterations=1000, tolerance=Decimal('1e-10')):
     n = len(A)
     if n == 0:
         return Decimal(0)
-
     x = [Decimal(str(random.random())) for _ in range(n)]
     x_norm = norm(x)
     if x_norm == Decimal(0):
@@ -42,21 +108,17 @@ def operator_norm(A, max_iterations=1000, tolerance=Decimal('1e-10')):
     for _ in range(max_iterations):
         Ax = matrix_vector_mult(A, x)
         AtAx = matrix_vector_mult(A_t, Ax)
-
         new_norm = norm(AtAx)
         if new_norm == Decimal(0):
             return Decimal(0)
         x_new = [xi / new_norm for xi in AtAx]
-
         delta = norm([x_new[i] - x[i] for i in range(n)])
         x = x_new
         if delta < tolerance:
             break
-
     Ax = matrix_vector_mult(A, x)
     AtAx = matrix_vector_mult(A_t, Ax)
     lambda_max = dot_product(AtAx, x)
-
     return lambda_max.sqrt()
 
 def gauss_seidel(A, b, x0, tol, max_iter):
@@ -140,22 +202,118 @@ def load_matrix_from_file(filename):
         print(f"Ошибка при чтении файла: {e}")
         return None, None, None
 
-def solve_with_lu(A, b):
-    A_np = np.array(A, dtype=float)
-    b_np = np.array(b, dtype=float)
-    P, L, U = lu(A_np)
-    y = scipy_solve(L, b_np)
-    x = scipy_solve(U, y)
-    return x
 
-def solve_with_qr(A, b):
-    A_np = np.array(A, dtype=float)
-    b_np = np.array(b, dtype=float)
-    Q, R = numpy_qr(A_np)
-    y = Q.T @ b_np
-    x = scipy_solve(R, y)
-    return x
+def check_qr_for_rectangular():
+    print("\n=== Проверка QR для не квадратной матрицы ===")
+    m = int(input("Введите количество строк: "))
+    n = int(input("Введите количество столбцов: "))
 
+    A = []
+    print(f"Введите матрицу {m}x{n} (по строкам, элементы через пробел):")
+    for i in range(m):
+        while True:
+            try:
+                row = list(map(lambda x: float(x.replace(',', '.')),
+                               input(f"Строка {i + 1}: ").split()))
+                if len(row) != n:
+                    print(f"Ошибка: в строке должно быть {n} элементов.")
+                    continue
+                A.append(row)
+                break
+            except Exception as e:
+                print(f"Ошибка: {e}")
+
+    try:
+        A_np = np.array(A, dtype=float)
+        Q, R = gram_schmidt_qr(A_np)
+
+        np.set_printoptions(
+            precision=8,
+            suppress=True,
+            floatmode="fixed"
+        )
+
+        print("\nМатрица Q:")
+        print(Q)
+        print("\nМатрица R:")
+        print(R)
+
+        QtQ = np.round(Q.T @ Q, 8)
+        print("\nQ^T * Q:")
+        print(QtQ)
+
+        A_reconstructed = Q @ R
+        print("\nВосстановленная матрица Q*R:")
+        print(A_reconstructed)
+
+    except Exception as e:
+        print(f"Ошибка: {e}")
+
+def check_lu_decomposition():
+    print("\n=== Проверка LU-разложения ===")
+    n = int(input("Введите размерность квадратной матрицы: "))
+
+    A = []
+    print(f"Введите матрицу {n}x{n} (по строкам, элементы через пробел):")
+    for i in range(n):
+        while True:
+            try:
+                row = list(map(float, input(f"Строка {i + 1}: ").split()))
+                if len(row) != n:
+                    print(f"Ошибка: в строке должно быть {n} элементов.")
+                    continue
+                A.append(row)
+                break
+            except Exception as e:
+                print(f"Ошибка: {e}")
+
+    b = []
+    print(f"Введите вектор b (элементы через пробел):")
+    while True:
+        try:
+            b = list(map(float, input().split()))
+            if len(b) != n:
+                print(f"Ошибка: в векторе должно быть {n} элементов.")
+                continue
+            break
+        except Exception as e:
+            print(f"Ошибка: {e}")
+
+    try:
+        A_np = np.array(A, dtype=float)
+        b_np = np.array(b, dtype=float)
+        L, U = lu_decomposition(A_np)
+        print("\nматрица L:")
+        for row in L:
+            print("[", "  ".join(f"{x:10.6f}" for x in row), "]")
+        print("\nматрица U:")
+        for row in U:
+            print("[", "  ".join(f"{x:10.6f}" for x in row), "]")
+        det_L = np.prod(np.diag(L))
+        det_U = np.prod(np.diag(U))
+        det_A = det_L * det_U
+        print("\nопределители:")
+        print(f"det(L) = {det_L:.6f}")
+        print(f"det(U) = {det_U:.6f}")
+        print(f"det(A) = det(L) * det(U) = {det_A:.6f}")
+        det_A_numpy = np.linalg.det(A_np)
+        reconstructed = L @ U
+        print("\nпроверка L*U:")
+        for row in reconstructed:
+            print("[", "  ".join(f"{x:10.6f}" for x in row), "]")
+
+        y = forward_substitution(L, b_np)
+        x = backward_substitution(U, y)
+
+        print("\nрешение Ax = b:")
+        for i, xi in enumerate(x, 1):
+            print(f"x{i} = {xi:.6f}")
+
+        residual = A_np @ x - b_np
+        error = np.linalg.norm(residual)
+
+    except Exception as e:
+        print(f"Ошибка: {e}")
 def main():
     getcontext().prec = 100
 
@@ -164,16 +322,26 @@ def main():
         print("1. Клавиатура")
         print("2. Файл")
         print("3. Случайная генерация")
+        print("4. Проверка QR-разложения")
+        print("5. Проверка LU-разложения")
         try:
             method = input("Введите номер или название способа: ").lower()
         except EOFError:
             print("\nОбнаружен ввод Ctrl+D. Программа завершена.")
             return
 
-        if method in ["1", "клавиатура", "2", "файл", "3", "случайная"]:
+        allowed_methods = ["1", "2", "3", "4", "5", "клавиатура", "файл", "случайная", "qr", "lu"]
+        if method in allowed_methods:
             break
         else:
-            print("Некорректный выбор. Пожалуйста, введите 1, 2, 3 или соответствующее название.")
+            print("Некорректный выбор. Пожалуйста, введите 1-4 или соответствующее название.")
+
+    if method in ["4", "qr"]:
+        check_qr_for_rectangular()
+        return
+    if method in ["5", "lu"]:
+        check_lu_decomposition()
+        return
 
     if method == "1" or method == "клавиатура":
         while True:
@@ -298,11 +466,13 @@ def main():
             print("Ошибка: Невозможно достичь диагонального преобладания.")
             return
 
-    matrix_norm = operator_norm(A)
-    print(f"Операторная Норма матрицы: {matrix_norm}")
+    try:
+        matrix_norm = operator_norm(A)
+        print(f"\nОператорная норма матрицы: {matrix_norm}")
+    except Exception as e:
+        print(f"\nОшибка при вычислении операторной нормы: {e}")
 
     x0 = [Decimal(1)] * n
-
     x, iterations = gauss_seidel(A, b, x0, tol, max_iter)
 
     print("Решение методом Гаусса-Зейделя:")
@@ -324,13 +494,11 @@ def main():
     else:
         print("Требуемая точность не достигнута.")
 
-    # Решение с использованием LU-разложения
     x_lu = solve_with_lu(A, b)
     print("Решение методом LU-разложения:")
     for i, sol in enumerate(x_lu, start=1):
         print(f"x{i} = {sol}")
 
-    # Решение с использованием QR-разложения
     x_qr = solve_with_qr(A, b)
     print("Решение методом QR-разложения:")
     for i, sol in enumerate(x_qr, start=1):
@@ -339,7 +507,7 @@ def main():
 def generate_random_matrix(n):
     A = [[Decimal(0)] * n for _ in range(n)]
     for i in range(n):
-        diagonal_value = Decimal(random.uniform(100, 200))  # Большое значение
+        diagonal_value = Decimal(random.uniform(100, 200))
         A[i][i] = diagonal_value
 
         for j in range(n):
